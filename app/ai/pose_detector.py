@@ -73,7 +73,7 @@ LANDMARK_NAMES = {
 
 
 class PoseDetector:
-    def __init__(self, min_detection_confidence: float = 0.4):
+    def __init__(self, min_detection_confidence: float = 0.25):
         model_path = _ensure_model()
         options = PoseLandmarkerOptions(
             base_options=mp_tasks.BaseOptions(model_asset_path=model_path),

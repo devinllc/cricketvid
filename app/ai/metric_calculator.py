@@ -16,7 +16,8 @@ def _get_point(lm_frame: Dict, key: str) -> Optional[np.ndarray]:
     if lm_frame is None or key not in lm_frame:
         return None
     d = lm_frame[key]
-    if d.get("visibility", 0) < 0.3:
+    # Be lenient: low-light or partial occlusion still yields useful relative geometry
+    if d.get("visibility", 1.0) < 0.1:
         return None
     return np.array([d["x"], d["y"], d["z"]])
 
