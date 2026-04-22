@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cricket AI — Assessment Report | {{ report.drill_type }}</title>
+  <meta name="description" content="Cricket video assessment report for {{ report.drill_type }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body class="report-page">
+
+  <div class="bg-orb orb-1"></div>
+  <div class="bg-orb orb-2"></div>
+  <div class="bg-orb orb-3"></div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-inner">
+      <a href="/" class="logo" style="text-decoration:none;">
+        <span class="logo-icon">🏏</span>
+        <span class="logo-text">Cricket<span class="logo-accent">AI</span></span>
+      </a>
+      <div class="nav-links">
+        <a href="/" class="nav-link">← New Analysis</a>
+        <a href="/docs" target="_blank" class="nav-link">API</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="report-main">
+
+    <!-- Hero Score -->
+    <section class="score-hero">
+      <div class="score-badge-wrap">
+        <div class="score-wheel">
+          <svg class="score-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+            <circle class="score-track" cx="100" cy="100" r="80" />
+            <circle
+              class="score-fill"
+              cx="100" cy="100" r="80"
+              stroke-dasharray="{{ (report.player_score / 100 * 502.65) | round(2) }} 502.65"
+              stroke-dashoffset="0"
+              id="scoreArc"
+            />
+          </svg>
+          <div class="score-center">
+            <span class="score-number" id="scoreNumber">0</span>
+            <span class="score-label">/ 100</span>
+          </div>
+        </div>
+      </div>
+      <div class="score-info">
+        <div class="performance-band band-{{ report.performance_band | lower }}">
+          {{ report.performance_band }}
+        </div>
+        <h1 class="report-title">{{ report.drill_type }}</h1>
+        <p class="report-subtitle">Assessment Report</p>
+        <div class="report-meta-row">
+          <span class="meta-chip">📁 {{ report.analysis_meta.video_filename }}</span>
+          <span class="meta-chip">🎬 {{ report.analysis_meta.frame_count }} frames</span>
+          <span class="meta-chip">⏱ {{ report.analysis_meta.processing_time_sec }}s</span>
+          <span class="meta-chip">🎯 {{ (report.analysis_meta.pose_detection_rate * 100) | round(1) }}% detection</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Metrics -->
+    <section class="report-section">
+      <h2 class="section-title">Biomechanical Metrics</h2>
+      <div class="metrics-grid">
+        {% for metric, score in report.metrics.items() %}
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-name">{{ metric.replace('_', ' ').title() }}</span>
+            <span class="metric-score metric-score-{{ 'high' if score >= 7 else ('mid' if score >= 5 else 'low') }}">{{ score }}/10</span>
+          </div>
+          <div class="metric-bar-track">
+            <div class="metric-bar-fill" style="width: {{ (score / 10 * 100) | round(1) }}%;"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <!-- Chart -->
+    <section class="report-section">
+      <h2 class="section-title">Radar Overview</h2>
+      <div class="chart-container">
+        <canvas id="metricsChart"></canvas>
+      </div>
+    </section>
+
+    <!-- Issues & Recommendations -->
+    <div class="two-col">
+      <!-- Issues -->
+      <section class="report-section issues-section">
+        <h2 class="section-title">⚠️ Issues Detected</h2>
+        {% if report.issues %}
+          <ul class="issue-list">
+            {% for issue in report.issues %}
+            <li class="issue-item">
+              <span class="issue-dot"></span>
+              <span>{{ issue }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="empty-state">
+            <span>✅</span>
+            <p>No major issues detected. Excellent technique!</p>
+          </div>
+        {% endif %}
+      </section>
+
+      <!-- Recommendations -->
+      <section class="report-section rec-section">
+        <h2 class="section-title">💡 Recommendations</h2>
+        {% if report.recommendations %}
+          <ol class="rec-list">
+            {% for rec in report.recommendations %}
+            <li class="rec-item">
+              <span class="rec-num">{{ loop.index }}</span>
+              <span>{{ rec }}</span>
+            </li>
+            {% endfor %}
+          </ol>
+        {% else %}
+          <div class="empty-state">
+            <span>🏆</span>
+            <p>Keep up the great work!</p>
+          </div>
+        {% endif %}
+      </section>
+    </div>
+
+    <!-- Raw JSON -->
+    <section class="report-section">
+      <h2 class="section-title">Raw API Response</h2>
+      <div class="json-block">
+        <button class="copy-btn" id="copyJson" onclick="copyJson()">Copy JSON</button>
+        <pre id="rawJson">{{ report | tojson(indent=2) }}</pre>
+      </div>
+    </section>
+
+    <!-- Actions -->
+    <div class="action-row">
+      <a href="/" class="action-btn primary-btn">🎬 Analyze Another Video</a>
+      <a href="/report/{{ job_id }}" class="action-btn secondary-btn">📄 Raw JSON API</a>
+    </div>
+
+  </main>
+
+  <footer class="footer">
+    <p>Cricket AI Assessment System — POC v1.0 | Job ID: {{ job_id }}</p>
+  </footer>
+
+  <script>
+    // Animate score counter
+    const targetScore = {{ report.player_score }};
+    const scoreEl = document.getElementById('scoreNumber');
+    let current = 0;
+    const duration = 1200;
+    const step = targetScore / (duration / 16);
+    const timer = setInterval(() => {
+      current = Math.min(current + step, targetScore);
+      scoreEl.textContent = Math.round(current);
+      if (current >= targetScore) clearInterval(timer);
+    }, 16);
+
+    // Radar chart
+    const metricsData = {{ report.metrics | tojson }};
+    const labels = Object.keys(metricsData).map(k => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
+    const values = Object.values(metricsData);
+
+    const ctx = document.getElementById('metricsChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'radar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: '{{ report.drill_type }}',
+          data: values,
+          backgroundColor: 'rgba(0, 212, 170, 0.15)',
+          borderColor: 'rgba(0, 212, 170, 0.9)',
+          borderWidth: 2,
+          pointBackgroundColor: 'rgba(0, 212, 170, 1)',
+          pointBorderColor: '#fff',
+          pointRadius: 5,
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          r: {
+            min: 0, max: 10,
+            ticks: { stepSize: 2, color: 'rgba(255,255,255,0.5)', backdropColor: 'transparent' },
+            grid: { color: 'rgba(255,255,255,0.08)' },
+            angleLines: { color: 'rgba(255,255,255,0.08)' },
+            pointLabels: { color: 'rgba(255,255,255,0.8)', font: { size: 12, family: 'Inter' } },
+          }
+        },
+        plugins: {
+          legend: { labels: { color: 'rgba(255,255,255,0.8)', font: { family: 'Inter' } } }
+        }
+      }
+    });
+
+    // Animate metric bars
+    document.addEventListener('DOMContentLoaded', () => {
+      const bars = document.querySelectorAll('.metric-bar-fill');
+      bars.forEach((bar, i) => {
+        const target = bar.style.width;
+        bar.style.width = '0%';
+        setTimeout(() => {
+          bar.style.transition = 'width 0.8s cubic-bezier(0.4, 0, 0.2, 1)';
+          bar.style.width = target;
+        }, 100 + i * 80);
+      });
+    });
+
+    function copyJson() {
+      const text = document.getElementById('rawJson').textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('copyJson');
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy JSON', 2000);
+      });
+    }
+  </script>
+</body>
+</html>

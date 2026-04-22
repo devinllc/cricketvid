@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cricket AI Assessment | Upload Video</title>
+  <meta name="description" content="AI-powered cricket video analysis. Upload your batting or bowling practice video and receive a detailed technical assessment report." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+
+  <!-- Background orbs -->
+  <div class="bg-orb orb-1"></div>
+  <div class="bg-orb orb-2"></div>
+  <div class="bg-orb orb-3"></div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">🏏</span>
+        <span class="logo-text">Cricket<span class="logo-accent">AI</span></span>
+      </div>
+      <nav class="nav-links">
+        <a href="/docs" target="_blank" class="nav-link">API Docs</a>
+        <a href="/health" target="_blank" class="nav-link">Health</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-badge">
+      <span class="badge-dot"></span>
+      Powered by MediaPipe + OpenCV
+    </div>
+    <h1 class="hero-title">
+      AI Cricket<br/>
+      <span class="gradient-text">Video Assessment</span>
+    </h1>
+    <p class="hero-subtitle">
+      Upload your batting or bowling practice video and receive an instant
+      technical analysis with biomechanical metrics and coaching recommendations.
+    </p>
+  </section>
+
+  <!-- Upload Card -->
+  <main class="main-content">
+    <div class="upload-card" id="uploadCard">
+
+      <!-- Drill Selector -->
+      <div class="form-group">
+        <label class="form-label" for="drillType">Select Drill Type</label>
+        <div class="drill-grid" id="drillGrid">
+          <button type="button" class="drill-btn active" data-value="straight_drive" id="drill-straight_drive">
+            <span class="drill-icon">🏏</span>
+            <span class="drill-name">Straight Drive</span>
+            <span class="drill-cat">Batting</span>
+          </button>
+          <button type="button" class="drill-btn" data-value="cover_drive" id="drill-cover_drive">
+            <span class="drill-icon">⚡</span>
+            <span class="drill-name">Cover Drive</span>
+            <span class="drill-cat">Batting</span>
+          </button>
+          <button type="button" class="drill-btn" data-value="bowling_action" id="drill-bowling_action">
+            <span class="drill-icon">🎯</span>
+            <span class="drill-name">Bowling Action</span>
+            <span class="drill-cat">Bowling</span>
+          </button>
+          <button type="button" class="drill-btn" data-value="spin_bowling" id="drill-spin_bowling">
+            <span class="drill-icon">🌀</span>
+            <span class="drill-name">Spin Bowling</span>
+            <span class="drill-cat">Bowling</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Drop Zone -->
+      <div class="form-group">
+        <label class="form-label">Upload Video</label>
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="videoFile" accept=".mp4,.mov,.avi,.mkv,.webm" hidden />
+          <div class="dropzone-content" id="dropzoneContent">
+            <div class="dropzone-icon">🎬</div>
+            <p class="dropzone-text">Drag & drop your video here</p>
+            <p class="dropzone-sub">or <button type="button" class="browse-btn" onclick="document.getElementById('videoFile').click()">Browse file</button></p>
+            <p class="dropzone-formats">MP4 · MOV · AVI · MKV · WebM · Max 500MB</p>
+          </div>
+          <div class="dropzone-preview" id="dropzonePreview" style="display:none;">
+            <div class="file-icon">🎥</div>
+            <div class="file-info">
+              <p class="file-name" id="fileName">video.mp4</p>
+              <p class="file-size" id="fileSize">24.5 MB</p>
+            </div>
+            <button type="button" class="remove-file" id="removeFile" title="Remove file">✕</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <button type="button" class="submit-btn" id="submitBtn" disabled>
+        <span class="btn-text">Analyze Video</span>
+        <span class="btn-icon">→</span>
+      </button>
+
+    </div>
+
+    <!-- Processing State -->
+    <div class="processing-card" id="processingCard" style="display:none;">
+      <div class="processing-animation">
+        <div class="pulse-ring"></div>
+        <div class="pulse-ring ring-2"></div>
+        <div class="processing-icon">🏏</div>
+      </div>
+      <h2 class="processing-title">Analyzing your video...</h2>
+      <p class="processing-sub">Running pose detection & cricket scoring logic</p>
+
+      <div class="pipeline-steps" id="pipelineSteps">
+        <div class="step" id="step-normalize">
+          <span class="step-icon step-waiting">◦</span>
+          <span>Normalizing video quality</span>
+        </div>
+        <div class="step" id="step-extract">
+          <span class="step-icon step-waiting">◦</span>
+          <span>Extracting frames</span>
+        </div>
+        <div class="step" id="step-pose">
+          <span class="step-icon step-waiting">◦</span>
+          <span>Running MediaPipe pose detection</span>
+        </div>
+        <div class="step" id="step-metrics">
+          <span class="step-icon step-waiting">◦</span>
+          <span>Computing biomechanical metrics</span>
+        </div>
+        <div class="step" id="step-scoring">
+          <span class="step-icon step-waiting">◦</span>
+          <span>Applying cricket scoring logic</span>
+        </div>
+        <div class="step" id="step-report">
+          <span class="step-icon step-waiting">◦</span>
+          <span>Generating assessment report</span>
+        </div>
+      </div>
+
+      <div class="job-id-display" id="jobIdDisplay" style="display:none;">
+        <span class="job-label">Job ID</span>
+        <span class="job-value" id="jobIdValue"></span>
+      </div>
+    </div>
+
+    <!-- Error State -->
+    <div class="error-card" id="errorCard" style="display:none;">
+      <div class="error-icon">⚠️</div>
+      <h2 class="error-title">Analysis Failed</h2>
+      <p class="error-message" id="errorMessage">Something went wrong.</p>
+      <button type="button" class="retry-btn" id="retryBtn">Try Again</button>
+    </div>
+
+  </main>
+
+  <!-- Features Section -->
+  <section class="features">
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <h3>Pose Detection</h3>
+        <p>33 body landmark keypoints tracked across every frame using MediaPipe</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>5 Key Metrics</h3>
+        <p>Head stability, footwork, shoulder rotation, balance, and bat/ball path</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🤖</div>
+        <h3>AI Scoring</h3>
+        <p>Drill-specific biomechanical scoring with actionable coaching feedback</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📱</div>
+        <h3>Mobile Ready</h3>
+        <p>Handles low-quality Android videos with FFmpeg enhancement pipeline</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <p>Cricket AI Assessment System — POC v1.0 | Built with FastAPI + MediaPipe + OpenCV</p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

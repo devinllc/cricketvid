@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  cricket-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cricket-assessment:latest
+    container_name: cricket-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist uploads and reports across container restarts
+      - uploads_data:/cricket/app/uploads
+      - processed_data:/cricket/app/processed
+    environment:
+      - PORT=8000
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cricket.rule=Host(`your-domain.com`)"
+      - "traefik.http.routers.cricket.entrypoints=websecure"
+      - "traefik.http.routers.cricket.tls.certresolver=letsencrypt"
+
+  # Optional: Nginx reverse proxy (use instead of Traefik for simple setups)
+  nginx:
+    image: nginx:alpine
+    container_name: cricket-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx_certs:/etc/nginx/certs
+    depends_on:
+      - cricket-api
+    profiles:
+      - nginx   # only starts with: docker compose --profile nginx up
+
+volumes:
+  uploads_data:
+  processed_data:
+  nginx_certs:

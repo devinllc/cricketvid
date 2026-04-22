@@ -1,0 +1,29 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.log
+
+# Environment files
+.env
+.env.*
+
+# macOS
+.DS_Store
+
+# App runtime data (do not commit user videos or processed outputs)
+app/uploads/
+app/processed/
+
+# Node/JS build artifacts (none currently, but safe)
+dist/
+build/
+node_modules/
