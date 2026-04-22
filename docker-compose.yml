@@ -40,6 +40,9 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - nginx_certs:/etc/nginx/certs
+    # Allow Nginx container to reach host services (e.g., Node on :3000)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - cricket-api
     profiles:
