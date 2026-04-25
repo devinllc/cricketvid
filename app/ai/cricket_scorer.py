@@ -12,8 +12,6 @@ logger = get_logger(__name__)
 DRILL_DISPLAY_NAMES = {
     "straight_drive": "Straight Drive",
     "cover_drive": "Cover Drive",
-    "bowling_action": "Bowling Action",
-    "spin_bowling": "Spin Bowling",
 }
 
 # Metric weights per drill type

@@ -68,6 +68,63 @@
     </section>
 
     <!-- Metrics -->
+      {% if report.trajectory and report.trajectory.overlay_video %}
+      <section style="margin-top: 28px;">
+        <h2 style="font-size:1.1rem; color:#e8edf2; margin:0 0 12px;">Ball Trajectory Analysis</h2>
+        <video src="/{{ report.trajectory.overlay_video }}" controls style="width:100%; max-height:480px; border-radius:12px; background:#0f1318;"></video>
+        <div style="margin-top:8px; color:#97a6b3; font-size:0.9rem;">
+          <span>Detections: {{ report.trajectory.points_detected }}</span>
+          {% if report.trajectory.px_speed_est %}
+          <span style="margin-left:16px;">Pixel speed: {{ report.trajectory.px_speed_est | round(1) }} px/s</span>
+          {% endif %}
+          {% if report.trajectory.model_used %}
+          <span style="margin-left:16px;">Model: {{ report.trajectory.model_used }}</span>
+          {% endif %}
+          {% if report.trajectory.quality_score %}
+          <span style="margin-left:16px;">Quality: {{ report.trajectory.quality_score | round(0) }}/100</span>
+          {% endif %}
+          {% if report.trajectory.bounce_frame is not none %}
+          <span style="margin-left:16px;">Bounce frame: {{ report.trajectory.bounce_frame }}</span>
+          {% endif %}
+          {% if report.trajectory.impact_frame is not none %}
+          <span style="margin-left:16px;">Bat impact frame: {{ report.trajectory.impact_frame }}</span>
+          {% endif %}
+          {% if report.trajectory.shot_type %}
+          <span style="margin-left:16px;">Shot outcome: {{ report.trajectory.shot_type | title }}</span>
+          {% endif %}
+          {% if report.trajectory.shot_confidence %}
+          <span style="margin-left:16px;">Shot confidence: {{ (report.trajectory.shot_confidence * 100) | round(0) }}%</span>
+          {% endif %}
+          {% if report.trajectory.tracking_confidence %}
+          <span style="margin-left:16px;">Tracking conf: {{ (report.trajectory.tracking_confidence * 100) | round(0) }}%</span>
+          {% endif %}
+          {% if report.trajectory.bounce_confidence %}
+          <span style="margin-left:16px;">Bounce conf: {{ (report.trajectory.bounce_confidence * 100) | round(0) }}%</span>
+          {% endif %}
+          {% if report.trajectory.impact_confidence %}
+          <span style="margin-left:16px;">Impact conf: {{ (report.trajectory.impact_confidence * 100) | round(0) }}%</span>
+          {% endif %}
+          {% if report.trajectory.calibration_confidence %}
+          <span style="margin-left:16px;">Calibration conf: {{ (report.trajectory.calibration_confidence * 100) | round(0) }}%</span>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
+
+    {% if report.shot_analysis %}
+    <section class="report-section" style="margin-top:16px;">
+      <h2 class="section-title">Shot Analysis</h2>
+      <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:8px;">
+        <span class="meta-chip">🏏 {{ report.shot_analysis.classification }}</span>
+        {% if report.shot_analysis.confidence %}
+        <span class="meta-chip">Confidence: {{ (report.shot_analysis.confidence * 100) | round(0) }}%</span>
+        {% endif %}
+      </div>
+      <p style="margin:12px 0 0; color:#cdd7df; line-height:1.5;">{{ report.shot_analysis.description }}</p>
+      <p style="margin:8px 0 0; color:#9db0bf; line-height:1.5;">Coach Note: {{ report.shot_analysis.coaching }}</p>
+    </section>
+    {% endif %}
+
     <section class="report-section">
       <h2 class="section-title">Biomechanical Metrics</h2>
       <div class="metrics-grid">

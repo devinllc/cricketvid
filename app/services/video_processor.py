@@ -10,6 +10,7 @@ from typing import Optional
 from app.ai import cricket_scorer, metric_calculator, pose_detector
 from app.reports.report_builder import build_report
 from app.services import frame_extractor, normalizer
+from app.services.ball_tracker import analyze_and_overlay
 from app.utils import job_store
 from app.utils.logger import get_logger
 
@@ -17,6 +18,29 @@ logger = get_logger(__name__)
 
 PROCESSED_DIR = Path(__file__).parent.parent / "processed"
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _build_shot_insight(traj) -> Optional[dict]:
+    if not traj or not getattr(traj, "shot_type", None):
+        return None
+
+    shot_type = str(getattr(traj, "shot_type", "")).lower()
+    conf = float(getattr(traj, "shot_confidence", 0.0) or 0.0)
+
+    if shot_type == "aerial":
+        return {
+            "classification": "Lofted Stroke",
+            "description": "Ball traveled in the air after bat impact (aerial trajectory).",
+            "coaching": "For controlled loft, keep the head over the ball, present the full face of the bat, and finish high through the line.",
+            "confidence": conf,
+        }
+
+    return {
+        "classification": "Along-the-Ground Stroke",
+        "description": "Ball stayed mostly along the turf after contact (ground stroke).",
+        "coaching": "Maintain a stable base, stay side-on, and keep the bat path vertical through impact for cleaner along-the-ground execution.",
+        "confidence": conf,
+    }
 
 
 def process_video(job_id: str, video_path: str, drill_type: str) -> None:
@@ -67,6 +91,14 @@ def process_video(job_id: str, video_path: str, drill_type: str) -> None:
             f"({detection_rate:.1%})"
         )
 
+        # ── Step 3.5: Batting ball trajectory + shot type ───────────────
+        logger.info(f"[{job_id}] Step 3.5/6: Detecting batting trajectory and shot outcome")
+        traj = None
+        try:
+            traj = analyze_and_overlay(frames, fps, job_dir, job_id, landmark_sequence)
+        except Exception as e:
+            logger.warning(f"[{job_id}] Ball tracking failed: {e}")
+
         # ── Step 4: Compute metrics ──────────────────────────────────────
         logger.info(f"[{job_id}] Step 4/6: Computing biomechanical metrics")
         metrics = metric_calculator.compute_all_metrics(landmark_sequence, drill_type)
@@ -77,11 +109,37 @@ def process_video(job_id: str, video_path: str, drill_type: str) -> None:
         scoring_result = cricket_scorer.score(
             metrics, drill_type, detection_rate=detection_rate
         )
+        shot_insight = _build_shot_insight(traj)
+        if shot_insight is not None:
+            scoring_result["recommendations"].insert(0, f"Shot Insight: {shot_insight['classification']}.")
+            scoring_result["recommendations"].append(str(shot_insight["coaching"]))
         drill_display_name = cricket_scorer.get_drill_display_name(drill_type)
 
         # ── Step 6: Build report ─────────────────────────────────────────
         logger.info(f"[{job_id}] Step 6/6: Building assessment report")
         processing_time = time.time() - start_time
+
+        extra_payload = {
+            "trajectory": {
+                "points_detected": sum(1 for p in (traj.points if traj else []) if p is not None) if traj else 0,
+                "px_speed_est": getattr(traj, "px_speed_est", None),
+                "coeffs": getattr(traj, "coeffs", None),
+                "overlay_video": getattr(traj, "overlay_relpath", None),
+                "model_used": getattr(traj, "model_used", None),
+                "quality_score": getattr(traj, "quality_score", None),
+                "bounce_frame": getattr(traj, "bounce_frame", None),
+                "impact_frame": getattr(traj, "impact_frame", None),
+                "shot_type": getattr(traj, "shot_type", None),
+                "shot_confidence": getattr(traj, "shot_confidence", None),
+                "tracking_confidence": getattr(traj, "tracking_confidence", None),
+                "bounce_confidence": getattr(traj, "bounce_confidence", None),
+                "impact_confidence": getattr(traj, "impact_confidence", None),
+                "calibration_confidence": getattr(traj, "calibration_confidence", None),
+            }
+        } if traj else {}
+        if shot_insight is not None:
+            extra_payload["shot_analysis"] = shot_insight
+
         report = build_report(
             job_id=job_id,
             drill_type=drill_type,
@@ -94,6 +152,7 @@ def process_video(job_id: str, video_path: str, drill_type: str) -> None:
             detected_frame_count=detected_count,
             processing_time_sec=processing_time,
             video_filename=video_filename,
+            extra=(extra_payload if extra_payload else None),
         )
 
         job_store.set_report(job_id, report)

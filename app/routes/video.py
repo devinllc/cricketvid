@@ -1,7 +1,6 @@
 """
 Video upload routes: POST /upload-video
 """
-import os
 import threading
 from pathlib import Path
 from typing import Optional
@@ -10,6 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from app.ai.cricket_scorer import SUPPORTED_DRILLS
+from app.celery_app import celery_app
 from app.services.video_processor import process_video
 from app.utils import job_store
 from app.utils.logger import get_logger
@@ -79,15 +79,25 @@ async def upload_video(
         logger.error(f"[{job_id}] File save failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
 
-    # Launch background processing thread
-    thread = threading.Thread(
-        target=process_video,
-        args=(job_id, str(save_path), drill_key),
-        daemon=True,
-        name=f"processor-{job_id[:8]}",
-    )
-    thread.start()
-    logger.info(f"[{job_id}] Background processing thread started")
+    # Queue the job in Celery (production path), with local-thread fallback.
+    queue_mode = "celery"
+    try:
+        celery_app.send_task(
+            "app.workers.tasks.process_video_job",
+            args=[job_id, str(save_path), drill_key],
+        )
+        logger.info(f"[{job_id}] Job queued in Celery")
+    except Exception as e:
+        queue_mode = "thread-fallback"
+        logger.warning(f"[{job_id}] Celery unavailable ({e}) — using local thread fallback")
+        thread = threading.Thread(
+            target=process_video,
+            args=(job_id, str(save_path), drill_key),
+            daemon=True,
+            name=f"processor-{job_id[:8]}",
+        )
+        thread.start()
+        logger.info(f"[{job_id}] Background processing thread started")
 
     return JSONResponse(
         status_code=202,
@@ -96,6 +106,7 @@ async def upload_video(
             "status": "queued",
             "drill_type": drill_key,
             "message": "Video uploaded successfully. Processing has started.",
+            "queue_mode": queue_mode,
             "poll_url": f"/status/{job_id}",
             "report_url": f"/report/{job_id}",
         },

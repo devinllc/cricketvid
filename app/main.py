@@ -32,7 +32,7 @@ app = FastAPI(
     title="Cricket Video Assessment System",
     description=(
         "AI-powered cricket practice video analysis. "
-        "Upload batting or bowling videos and receive detailed technical assessment reports."
+        "Upload batting videos and receive detailed technical assessment reports."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -53,6 +53,11 @@ app.add_middleware(
 static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Serve processed artifacts (overlay videos, etc.)
+processed_dir = Path(__file__).parent / "processed"
+processed_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/processed", StaticFiles(directory=str(processed_dir)), name="processed")
 
 # Templates
 templates = Jinja2Templates(

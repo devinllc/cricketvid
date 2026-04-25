@@ -40,7 +40,7 @@ else:
 def enhance_video(input_path: str, output_dir: str) -> str:
     """
     Normalize a video file:
-    - Scale to 720p
+    - Preserve source resolution
     - Denoise
     - Stabilize brightness
     Returns the path to the enhanced video file.
@@ -61,20 +61,19 @@ def enhance_video(input_path: str, output_dir: str) -> str:
 
 
 def _ffmpeg_enhance(input_path: str, output_path: str) -> None:
-    """Run FFmpeg with denoise + brightness normalization + scale to 720p."""
+    """Run FFmpeg with mild denoise + brightness normalization, preserving resolution."""
     cmd = [
         "ffmpeg",
         "-y",
         "-i", input_path,
         "-vf",
         (
-            "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease,"
-            "hqdn3d=1.5:1.5:6:6,"           # denoise
-            "eq=brightness=0.02:contrast=1.05"  # slight brightness boost
+            "hqdn3d=0.8:0.8:3:3,"
+            "eq=brightness=0.01:contrast=1.02"
         ),
         "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
+        "-preset", "slow",
+        "-crf", "17",
         "-an",          # strip audio (not needed for pose)
         output_path,
     ]
@@ -87,7 +86,7 @@ def _ffmpeg_enhance(input_path: str, output_path: str) -> None:
 
 
 def _opencv_enhance(input_path: str, output_path: str) -> None:
-    """Fallback: OpenCV frame-level CLAHE and resize."""
+    """Fallback: OpenCV frame-level CLAHE while preserving original resolution."""
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {input_path}")
@@ -101,11 +100,6 @@ def _opencv_enhance(input_path: str, output_path: str) -> None:
         ret, frame = cap.read()
         if not ret:
             break
-        # Resize
-        h, w = frame.shape[:2]
-        if w > 1280:
-            scale = 1280 / w
-            frame = cv2.resize(frame, (1280, int(h * scale)))
         # CLAHE on luminance channel
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)

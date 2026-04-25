@@ -20,6 +20,11 @@ bash run.sh
 
 Open your browser at: **http://localhost:8000**
 
+> Tip: For the Ball Trajectory (Beta) video to play reliably in all browsers,
+> install FFmpeg so the overlay is encoded as H.264:
+>
+> macOS: `brew install ffmpeg`  •  Ubuntu/Debian: `apt install ffmpeg`
+
 ---
 
 ## 🛠 Manual Setup
