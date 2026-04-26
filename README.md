@@ -25,6 +25,9 @@ Open your browser at: **http://localhost:8000**
 >
 > macOS: `brew install ffmpeg`  •  Ubuntu/Debian: `apt install ffmpeg`
 
+> Minimum server profile: 2 GB RAM, 1 web worker, and `ANALYSIS_INTERPOLATION_FACTOR=1`.
+> For heavier videos or concurrent uploads, 4 GB RAM+ is still recommended.
+
 ---
 
 ## 🛠 Manual Setup
@@ -189,7 +192,8 @@ Get the full assessment report (JSON or HTML).
 |---|---|
 | Python | 3.11+ |
 | FFmpeg | Any recent (via `brew install ffmpeg`) |
-| RAM | 4GB+ recommended |
+| RAM | 2GB minimum, 4GB+ recommended |
+| Web workers | 1 for small VPS, 2 only on larger hosts |
 | GPU | Not required — CPU-only |
 
 ---
@@ -233,3 +237,4 @@ curl http://localhost:8000/report/{job_id}
 - **Processing time**: 10–45 seconds depending on video length and CPU
 - **Storage**: All files stored locally. No cloud required for POC
 - **Concurrency**: Multiple videos can be processed in parallel via background threads
+- **Low-RAM deployment**: set `UVICORN_WORKERS=1` and `ANALYSIS_INTERPOLATION_FACTOR=1`

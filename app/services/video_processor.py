@@ -58,111 +58,113 @@ def process_video(job_id: str, video_path: str, drill_type: str) -> None:
     video_filename = Path(video_path).name
 
     try:
-        logger.info(f"[{job_id}] Starting pipeline for '{video_filename}' ({drill_type})")
-        job_store.update_status(job_id, job_store.STATUS_PROCESSING)
+        logger.info(f"[{job_id}] Waiting for the single processing slot")
+        with job_store.processing_slot(job_id):
+            logger.info(f"[{job_id}] Starting pipeline for '{video_filename}' ({drill_type})")
+            job_store.update_status(job_id, job_store.STATUS_PROCESSING)
 
-        # ── Step 1: Normalize video ──────────────────────────────────────
-        logger.info(f"[{job_id}] Step 1/6: Normalizing video")
-        job_dir = PROCESSED_DIR / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
+            # ── Step 1: Normalize video ──────────────────────────────────────
+            logger.info(f"[{job_id}] Step 1/6: Normalizing video")
+            job_dir = PROCESSED_DIR / job_id
+            job_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            normalized_path = normalizer.enhance_video(video_path, str(job_dir))
-        except Exception as e:
-            logger.warning(f"[{job_id}] Normalization failed ({e}) — using original")
-            normalized_path = video_path
+            try:
+                normalized_path = normalizer.enhance_video(video_path, str(job_dir))
+            except Exception as e:
+                logger.warning(f"[{job_id}] Normalization failed ({e}) — using original")
+                normalized_path = video_path
 
-        # ── Step 2: Extract frames ───────────────────────────────────────
-        logger.info(f"[{job_id}] Step 2/6: Extracting frames")
-        frames, fps = frame_extractor.extract_frames(normalized_path)
-        frame_count = len(frames)
-        logger.info(f"[{job_id}] Extracted {frame_count} frames at {fps:.1f} fps")
+            # ── Step 2: Extract frames ───────────────────────────────────────
+            logger.info(f"[{job_id}] Step 2/6: Extracting frames")
+            frames, fps = frame_extractor.extract_frames(normalized_path)
+            frame_count = len(frames)
+            logger.info(f"[{job_id}] Extracted {frame_count} frames at {fps:.1f} fps")
 
-        if frame_count == 0:
-            raise RuntimeError("No frames could be extracted from video")
+            if frame_count == 0:
+                raise RuntimeError("No frames could be extracted from video")
 
-        # ── Step 3: Pose detection ───────────────────────────────────────
-        logger.info(f"[{job_id}] Step 3/6: Running pose detection")
-        landmark_sequence = pose_detector.detect_poses(frames)
-        detected_count = sum(1 for lm in landmark_sequence if lm is not None)
-        detection_rate = detected_count / frame_count
-        logger.info(
-            f"[{job_id}] Pose detected in {detected_count}/{frame_count} frames "
-            f"({detection_rate:.1%})"
-        )
+            # ── Step 3: Pose detection ───────────────────────────────────────
+            logger.info(f"[{job_id}] Step 3/6: Running pose detection")
+            landmark_sequence = pose_detector.detect_poses(frames)
+            detected_count = sum(1 for lm in landmark_sequence if lm is not None)
+            detection_rate = detected_count / frame_count
+            logger.info(
+                f"[{job_id}] Pose detected in {detected_count}/{frame_count} frames "
+                f"({detection_rate:.1%})"
+            )
 
-        # ── Step 3.5: Batting ball trajectory + shot type ───────────────
-        logger.info(f"[{job_id}] Step 3.5/6: Detecting batting trajectory and shot outcome")
-        traj = None
-        try:
-            traj = analyze_and_overlay(frames, fps, job_dir, job_id, landmark_sequence)
-        except Exception as e:
-            logger.warning(f"[{job_id}] Ball tracking failed: {e}")
+            # ── Step 3.5: Batting ball trajectory + shot type ───────────────
+            logger.info(f"[{job_id}] Step 3.5/6: Detecting batting trajectory and shot outcome")
+            traj = None
+            try:
+                traj = analyze_and_overlay(frames, fps, job_dir, job_id, landmark_sequence)
+            except Exception as e:
+                logger.warning(f"[{job_id}] Ball tracking failed: {e}")
 
-        # ── Step 4: Compute metrics ──────────────────────────────────────
-        logger.info(f"[{job_id}] Step 4/6: Computing biomechanical metrics")
-        metrics = metric_calculator.compute_all_metrics(landmark_sequence, drill_type)
-        logger.info(f"[{job_id}] Metrics: {metrics}")
+            # ── Step 4: Compute metrics ──────────────────────────────────────
+            logger.info(f"[{job_id}] Step 4/6: Computing biomechanical metrics")
+            metrics = metric_calculator.compute_all_metrics(landmark_sequence, drill_type)
+            logger.info(f"[{job_id}] Metrics: {metrics}")
 
-        # ── Step 5: Score ────────────────────────────────────────────────
-        logger.info(f"[{job_id}] Step 5/6: Applying cricket scoring logic")
-        scoring_result = cricket_scorer.score(
-            metrics, drill_type, detection_rate=detection_rate
-        )
-        shot_insight = _build_shot_insight(traj)
-        if shot_insight is not None:
-            scoring_result["recommendations"].insert(0, f"Shot Insight: {shot_insight['classification']}.")
-            scoring_result["recommendations"].append(str(shot_insight["coaching"]))
-        drill_display_name = cricket_scorer.get_drill_display_name(drill_type)
+            # ── Step 5: Score ────────────────────────────────────────────────
+            logger.info(f"[{job_id}] Step 5/6: Applying cricket scoring logic")
+            scoring_result = cricket_scorer.score(
+                metrics, drill_type, detection_rate=detection_rate
+            )
+            shot_insight = _build_shot_insight(traj)
+            if shot_insight is not None:
+                scoring_result["recommendations"].insert(0, f"Shot Insight: {shot_insight['classification']}.")
+                scoring_result["recommendations"].append(str(shot_insight["coaching"]))
+            drill_display_name = cricket_scorer.get_drill_display_name(drill_type)
 
-        # ── Step 6: Build report ─────────────────────────────────────────
-        logger.info(f"[{job_id}] Step 6/6: Building assessment report")
-        processing_time = time.time() - start_time
+            # ── Step 6: Build report ─────────────────────────────────────────
+            logger.info(f"[{job_id}] Step 6/6: Building assessment report")
+            processing_time = time.time() - start_time
 
-        extra_payload = {
-            "trajectory": {
-                "points_detected": sum(1 for p in (traj.points if traj else []) if p is not None) if traj else 0,
-                "px_speed_est": getattr(traj, "px_speed_est", None),
-                "coeffs": getattr(traj, "coeffs", None),
-                "overlay_video": getattr(traj, "overlay_relpath", None),
-                "model_used": getattr(traj, "model_used", None),
-                "quality_score": getattr(traj, "quality_score", None),
-                "bounce_frame": getattr(traj, "bounce_frame", None),
-                "impact_frame": getattr(traj, "impact_frame", None),
-                "shot_type": getattr(traj, "shot_type", None),
-                "shot_confidence": getattr(traj, "shot_confidence", None),
-                "tracking_confidence": getattr(traj, "tracking_confidence", None),
-                "bounce_confidence": getattr(traj, "bounce_confidence", None),
-                "impact_confidence": getattr(traj, "impact_confidence", None),
-                "calibration_confidence": getattr(traj, "calibration_confidence", None),
-            }
-        } if traj else {}
-        if shot_insight is not None:
-            extra_payload["shot_analysis"] = shot_insight
+            extra_payload = {
+                "trajectory": {
+                    "points_detected": sum(1 for p in (traj.points if traj else []) if p is not None) if traj else 0,
+                    "px_speed_est": getattr(traj, "px_speed_est", None),
+                    "coeffs": getattr(traj, "coeffs", None),
+                    "overlay_video": getattr(traj, "overlay_relpath", None),
+                    "model_used": getattr(traj, "model_used", None),
+                    "quality_score": getattr(traj, "quality_score", None),
+                    "bounce_frame": getattr(traj, "bounce_frame", None),
+                    "impact_frame": getattr(traj, "impact_frame", None),
+                    "shot_type": getattr(traj, "shot_type", None),
+                    "shot_confidence": getattr(traj, "shot_confidence", None),
+                    "tracking_confidence": getattr(traj, "tracking_confidence", None),
+                    "bounce_confidence": getattr(traj, "bounce_confidence", None),
+                    "impact_confidence": getattr(traj, "impact_confidence", None),
+                    "calibration_confidence": getattr(traj, "calibration_confidence", None),
+                }
+            } if traj else {}
+            if shot_insight is not None:
+                extra_payload["shot_analysis"] = shot_insight
 
-        report = build_report(
-            job_id=job_id,
-            drill_type=drill_type,
-            drill_display_name=drill_display_name,
-            player_score=scoring_result["player_score"],
-            metrics=metrics,
-            issues=scoring_result["issues"],
-            recommendations=scoring_result["recommendations"],
-            frame_count=frame_count,
-            detected_frame_count=detected_count,
-            processing_time_sec=processing_time,
-            video_filename=video_filename,
-            extra=(extra_payload if extra_payload else None),
-        )
+            report = build_report(
+                job_id=job_id,
+                drill_type=drill_type,
+                drill_display_name=drill_display_name,
+                player_score=scoring_result["player_score"],
+                metrics=metrics,
+                issues=scoring_result["issues"],
+                recommendations=scoring_result["recommendations"],
+                frame_count=frame_count,
+                detected_frame_count=detected_count,
+                processing_time_sec=processing_time,
+                video_filename=video_filename,
+                extra=(extra_payload if extra_payload else None),
+            )
 
-        job_store.set_report(job_id, report)
-        logger.info(
-            f"[{job_id}] ✅ Pipeline complete in {processing_time:.1f}s — "
-            f"score={scoring_result['player_score']}"
-        )
+            job_store.set_report(job_id, report)
+            logger.info(
+                f"[{job_id}] ✅ Pipeline complete in {processing_time:.1f}s — "
+                f"score={scoring_result['player_score']}"
+            )
 
-        # Clean up frames from memory
-        frames.clear()
+            # Clean up frames from memory
+            frames.clear()
 
     except Exception as exc:
         elapsed = time.time() - start_time

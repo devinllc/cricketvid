@@ -7,7 +7,9 @@ import threading
 import uuid
 import json
 import os
+import time
 from datetime import datetime
+from contextlib import contextmanager
 from typing import Any, Dict, Optional
 
 try:
@@ -23,6 +25,9 @@ STATUS_FAILED = "failed"
 
 _store: Dict[str, Dict[str, Any]] = {}
 _lock = threading.Lock()
+_processing_lock = threading.Lock()
+_PROCESSING_LOCK_KEY = "cricket:processing-lock"
+_PROCESSING_LOCK_TTL_SECONDS = int(os.getenv("PROCESSING_LOCK_TTL_SECONDS", "14400"))
 
 
 def _redis_client():
@@ -194,3 +199,41 @@ def list_jobs() -> list:
             }
             for v in _store.values()
         ]
+
+
+def _acquire_redis_processing_lock(client, job_id: str, timeout: Optional[int] = None):
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        if client.set(_PROCESSING_LOCK_KEY, job_id, nx=True, ex=_PROCESSING_LOCK_TTL_SECONDS):
+            return
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("Timed out waiting for the processing slot")
+        time.sleep(1)
+
+
+def _release_redis_processing_lock(client, job_id: str) -> None:
+    try:
+        current_holder = client.get(_PROCESSING_LOCK_KEY)
+        if current_holder == job_id:
+            client.delete(_PROCESSING_LOCK_KEY)
+    except Exception:
+        pass
+
+
+@contextmanager
+def processing_slot(job_id: str, timeout: Optional[int] = None):
+    """Serialize all analysis jobs so only one runs at a time."""
+    client = _redis_client()
+    if client is not None:
+        _acquire_redis_processing_lock(client, job_id, timeout=timeout)
+        try:
+            yield
+        finally:
+            _release_redis_processing_lock(client, job_id)
+        return
+
+    _processing_lock.acquire()
+    try:
+        yield
+    finally:
+        _processing_lock.release()

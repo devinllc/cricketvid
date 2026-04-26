@@ -9,6 +9,8 @@ set -e
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 PORT="${PORT:-8000}"
+UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
+export ANALYSIS_INTERPOLATION_FACTOR="${ANALYSIS_INTERPOLATION_FACTOR:-1}"
 
 echo ""
 echo "🏏 Cricket Video Assessment System"
@@ -50,7 +52,8 @@ echo ""
 echo "🚀 Starting server on http://localhost:$PORT"
 echo "   API Docs: http://localhost:$PORT/docs"
 echo "   Upload UI: http://localhost:$PORT/"
+echo "   Workers: $UVICORN_WORKERS | Frame interpolation: x$ANALYSIS_INTERPOLATION_FACTOR"
 echo ""
 
 cd "$PROJECT_DIR"
-uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --reload
+uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --workers "$UVICORN_WORKERS"
