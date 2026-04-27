@@ -10,7 +10,7 @@ from typing import Optional
 from app.ai import cricket_scorer, metric_calculator, pose_detector
 from app.reports.report_builder import build_report
 from app.services import frame_extractor, normalizer
-from app.services.ball_tracker import analyze_and_overlay
+from app.services.ball_tracker import analyze_shot_summary
 from app.utils import job_store
 from app.utils.logger import get_logger
 
@@ -78,7 +78,8 @@ def process_video(job_id: str, video_path: str, drill_type: str) -> None:
             logger.info(f"[{job_id}] Step 2/6: Extracting frames")
             frames, fps = frame_extractor.extract_frames(normalized_path)
             frame_count = len(frames)
-            logger.info(f"[{job_id}] Extracted {frame_count} frames at {fps:.1f} fps")
+            video_height, video_width = frames[0].shape[:2] if frames else (0, 0)
+            logger.info(f"[{job_id}] Extracted {frame_count} frames at {fps:.1f} fps ({video_width}x{video_height})")
 
             if frame_count == 0:
                 raise RuntimeError("No frames could be extracted from video")
@@ -93,13 +94,13 @@ def process_video(job_id: str, video_path: str, drill_type: str) -> None:
                 f"({detection_rate:.1%})"
             )
 
-            # ── Step 3.5: Batting ball trajectory + shot type ───────────────
-            logger.info(f"[{job_id}] Step 3.5/6: Detecting batting trajectory and shot outcome")
-            traj = None
+            # ── Step 3.5: Shot direction summary ────────────────────────────
+            logger.info(f"[{job_id}] Step 3.5/6: Building shot direction summary")
+            shot_summary = None
             try:
-                traj = analyze_and_overlay(frames, fps, job_dir, job_id, landmark_sequence)
+                shot_summary = analyze_shot_summary(frames, fps, job_dir, landmark_sequence)
             except Exception as e:
-                logger.warning(f"[{job_id}] Ball tracking failed: {e}")
+                logger.warning(f"[{job_id}] Shot summary generation failed: {e}")
 
             # ── Step 4: Compute metrics ──────────────────────────────────────
             logger.info(f"[{job_id}] Step 4/6: Computing biomechanical metrics")
@@ -111,37 +112,42 @@ def process_video(job_id: str, video_path: str, drill_type: str) -> None:
             scoring_result = cricket_scorer.score(
                 metrics, drill_type, detection_rate=detection_rate
             )
-            shot_insight = _build_shot_insight(traj)
-            if shot_insight is not None:
-                scoring_result["recommendations"].insert(0, f"Shot Insight: {shot_insight['classification']}.")
-                scoring_result["recommendations"].append(str(shot_insight["coaching"]))
+            if shot_summary is not None and shot_summary.summary_text:
+                scoring_result["recommendations"].insert(0, shot_summary.summary_text)
             drill_display_name = cricket_scorer.get_drill_display_name(drill_type)
 
             # ── Step 6: Build report ─────────────────────────────────────────
             logger.info(f"[{job_id}] Step 6/6: Building assessment report")
             processing_time = time.time() - start_time
 
-            extra_payload = {
-                "trajectory": {
-                    "points_detected": sum(1 for p in (traj.points if traj else []) if p is not None) if traj else 0,
-                    "px_speed_est": getattr(traj, "px_speed_est", None),
-                    "coeffs": getattr(traj, "coeffs", None),
-                    "overlay_video": getattr(traj, "overlay_relpath", None),
-                    "model_used": getattr(traj, "model_used", None),
-                    "quality_score": getattr(traj, "quality_score", None),
-                    "bounce_frame": getattr(traj, "bounce_frame", None),
-                    "impact_frame": getattr(traj, "impact_frame", None),
-                    "shot_type": getattr(traj, "shot_type", None),
-                    "shot_confidence": getattr(traj, "shot_confidence", None),
-                    "tracking_confidence": getattr(traj, "tracking_confidence", None),
-                    "bounce_confidence": getattr(traj, "bounce_confidence", None),
-                    "impact_confidence": getattr(traj, "impact_confidence", None),
-                    "calibration_confidence": getattr(traj, "calibration_confidence", None),
+            extra_payload = {}
+            if shot_summary is not None:
+                extra_payload["shot_summary"] = {
+                    "summary_text": shot_summary.summary_text,
+                    "shots": shot_summary.shots,
+                    "wagon_wheel": shot_summary.wagon_wheel,
+                    "impact_frame": shot_summary.impact_frame,
+                    "impact_point": (
+                        {"x": shot_summary.impact_point[0], "y": shot_summary.impact_point[1]}
+                        if shot_summary.impact_point is not None
+                        else None
+                    ),
+                    "landing_point": (
+                        {"x": shot_summary.landing_point[0], "y": shot_summary.landing_point[1]}
+                        if shot_summary.landing_point is not None
+                        else None
+                    ),
+                    "shot_type": shot_summary.shot_type,
+                    "shot_confidence": shot_summary.shot_confidence,
+                    "region": shot_summary.region,
+                    "side": shot_summary.side,
                 }
-            } if traj else {}
-            if shot_insight is not None:
-                extra_payload["shot_analysis"] = shot_insight
 
+            extra_payload["video_dimensions"] = {
+                "width": video_width,
+                "height": video_height,
+                "aspect_ratio": f"{video_width}:{video_height}" if video_height > 0 else "16:9",
+            }
             report = build_report(
                 job_id=job_id,
                 drill_type=drill_type,

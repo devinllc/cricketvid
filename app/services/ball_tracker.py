@@ -47,6 +47,20 @@ class TrajectoryResult:
 
 
 @dataclass
+class ShotSummaryResult:
+    shots: List[Dict[str, Any]]
+    wagon_wheel: Dict[str, Any]
+    impact_frame: Optional[int] = None
+    shot_type: Optional[str] = None
+    shot_confidence: Optional[float] = None
+    impact_point: Optional[Tuple[int, int]] = None
+    landing_point: Optional[Tuple[int, int]] = None
+    region: Optional[str] = None
+    side: Optional[str] = None
+    summary_text: Optional[str] = None
+
+
+@dataclass
 class _TrajectoryFit:
     coeffs_x: np.ndarray
     coeffs_y: np.ndarray
@@ -475,6 +489,145 @@ def _detect_bat_impact_and_shot(
     return impact_idx, shot_type, confidence
 
 
+def _format_timestamp(frame_idx: int, fps: float) -> str:
+    if fps <= 0:
+        return "0:00"
+    total_seconds = max(0.0, frame_idx / fps)
+    minutes = int(total_seconds // 60)
+    seconds = int(round(total_seconds % 60))
+    return f"{minutes}:{seconds:02d}"
+
+
+def _classify_shot_region(
+    impact_point: Tuple[int, int],
+    landing_point: Tuple[int, int],
+    frame_shape: Tuple[int, int, int],
+) -> Tuple[str, str]:
+    """Map post-impact direction to a coarse batting region."""
+    h, w = frame_shape[:2]
+    dx = landing_point[0] - impact_point[0]
+    dy = landing_point[1] - impact_point[1]
+
+    horizontal_threshold = max(18, int(w * 0.07))
+    vertical_threshold = max(10, int(h * 0.05))
+
+    if abs(dx) <= horizontal_threshold:
+        if dy >= vertical_threshold:
+            return "Straight / Mid-on", "straight"
+        return "Straight / Down the ground", "straight"
+
+    if dx < 0:
+        if dy >= -vertical_threshold:
+            return "Cover / Extra Cover", "off_side"
+        return "Backward Point", "off_side"
+
+    if dy >= -vertical_threshold:
+        return "Mid-wicket / Square Leg", "leg_side"
+    return "Fine Leg / Third Man", "leg_side"
+
+
+def _extract_landing_point(
+    centers: List[Optional[Tuple[int, int]]],
+    impact_idx: int,
+) -> Optional[Tuple[int, int]]:
+    post_pts = [p for i, p in enumerate(centers) if p is not None and i > impact_idx]
+    if not post_pts:
+        return None
+    sample = post_pts[: min(6, len(post_pts))]
+    xs = [p[0] for p in sample]
+    ys = [p[1] for p in sample]
+    return int(round(float(np.median(xs)))), int(round(float(np.median(ys))))
+
+
+def _map_zone_to_wagon_wheel(region: str) -> str:
+    """Map region string to wagon wheel zone code for counting."""
+    zone_map = {
+        "Cover / Extra Cover": "cover",
+        "Mid-off": "mid_off",
+        "Backward Point": "backward_point",
+        "Fine Leg": "fine_leg",
+        "Square Leg": "square_leg",
+        "Mid-wicket": "mid_wicket",
+        "Mid-on": "mid_on",
+        "Straight / Mid-on": "mid_on",
+        "Straight / Down the Ground": "straight",
+        "Straight / Down the ground": "straight",
+    }
+    return zone_map.get(region, "unknown")
+
+
+def _save_impact_frame(frame: np.ndarray, impact_point: Tuple[int, int], output_path: Path) -> None:
+    """Save frame with impact point circle overlay."""
+    f = frame.copy()
+    ix, iy = impact_point
+    cv2.circle(f, (ix, iy), 12, (255, 255, 255), 3, lineType=cv2.LINE_AA)
+    cv2.circle(f, (ix, iy), 8, (0, 140, 255), -1, lineType=cv2.LINE_AA)
+    cv2.putText(f, "BAT IMPACT", (max(8, ix - 80), max(24, iy - 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    cv2.imwrite(str(output_path), f)
+
+
+def _build_wagon_wheel_summary(shots: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build wagon wheel zone counts from shots (8 zones)."""
+    zones = {
+        "cover": 0,
+        "mid_off": 0,
+        "backward_point": 0,
+        "fine_leg": 0,
+        "square_leg": 0,
+        "mid_wicket": 0,
+        "mid_on": 0,
+        "straight": 0,
+    }
+    for shot in shots:
+        zone = shot.get("zone", "unknown")
+        if zone in zones:
+            zones[zone] += 1
+
+    off_side_total = zones["cover"] + zones["mid_off"] + zones["backward_point"]
+    leg_side_total = zones["fine_leg"] + zones["square_leg"] + zones["mid_wicket"]
+    straight_total = zones["mid_on"] + zones["straight"]
+
+    dominant_side = None
+    if off_side_total > leg_side_total and off_side_total > straight_total:
+        dominant_side = "off_side"
+    elif leg_side_total > off_side_total and leg_side_total > straight_total:
+        dominant_side = "leg_side"
+    elif straight_total > 0:
+        dominant_side = "straight"
+
+    return {
+        "zones": zones,
+        "off_side_total": off_side_total,
+        "leg_side_total": leg_side_total,
+        "straight_total": straight_total,
+        "dominant_side": dominant_side,
+        "summary": (
+            f"Off-side: {off_side_total} shots | Leg-side: {leg_side_total} shots | Straight: {straight_total} shots"
+            if shots
+            else "No shot summary could be generated."
+        ),
+    }
+
+
+def _contiguous_detection_runs(centers: List[Optional[Tuple[int, int]]], min_len: int = 8) -> List[Tuple[int, int]]:
+    """Return [start, end) ranges for contiguous non-empty detections."""
+    runs: List[Tuple[int, int]] = []
+    start: Optional[int] = None
+
+    for idx, center in enumerate(centers):
+        if center is not None and start is None:
+            start = idx
+        elif center is None and start is not None:
+            if idx - start >= min_len:
+                runs.append((start, idx))
+            start = None
+
+    if start is not None and len(centers) - start >= min_len:
+        runs.append((start, len(centers)))
+
+    return runs
+
+
 def _draw_trajectory(
     frame: np.ndarray,
     centers: List[Optional[Tuple[int, int]]],
@@ -690,4 +843,109 @@ def analyze_and_overlay(
         bounce_confidence=(round(bounce_conf, 3) if bounce_conf > 0 else None),
         impact_confidence=shot_confidence,
         calibration_confidence=calibration_conf,
+    )
+
+
+def analyze_shot_summary(
+    frames: List[np.ndarray],
+    fps: float,
+    job_dir: Path,
+    landmark_sequence: Optional[List[Optional[Dict[str, Any]]]] = None,
+) -> ShotSummaryResult:
+    """Generate a light-weight shot summary with frame captures at impact points."""
+    job_dir = Path(job_dir)
+    centers_raw, model_used = _detect_ball_centers(frames)
+    centers, tracking_conf = _kalman_smooth_track(centers_raw)
+
+    shots: List[Dict[str, Any]] = []
+    impact_frame: Optional[int] = None
+    shot_type: Optional[str] = None
+    shot_confidence: Optional[float] = None
+    impact_point: Optional[Tuple[int, int]] = None
+    landing_point: Optional[Tuple[int, int]] = None
+    region: Optional[str] = None
+    side: Optional[str] = None
+    summary_text: Optional[str] = None
+
+    runs = _contiguous_detection_runs(centers)
+    for shot_number, (start_idx, end_idx) in enumerate(runs, start=1):
+        run_frames = frames[start_idx:end_idx]
+        run_centers = centers[start_idx:end_idx]
+        run_landmarks = landmark_sequence[start_idx:end_idx] if landmark_sequence and len(landmark_sequence) == len(frames) else None
+        local_impact, local_shot_type, local_shot_conf = _detect_bat_impact_and_shot(run_frames, run_centers, run_landmarks)
+        if local_impact is None:
+            continue
+
+        local_impact_point = run_centers[local_impact] if 0 <= local_impact < len(run_centers) else None
+        local_landing_point = _extract_landing_point(run_centers, local_impact)
+        if local_impact_point is None or local_landing_point is None:
+            continue
+
+        local_region, local_side = _classify_shot_region(local_impact_point, local_landing_point, run_frames[local_impact].shape)
+        local_zone = _map_zone_to_wagon_wheel(local_region)
+        shot_time = _format_timestamp(start_idx + local_impact, fps)
+
+        if local_side == "off_side":
+            shot_label = "Played to the off-side"
+        elif local_side == "leg_side":
+            shot_label = "Played to the leg-side"
+        else:
+            shot_label = "Played straight down the pitch"
+
+        shot_summary = f"Shot {shot_number} ({shot_time}): {shot_label}, directed towards the {local_region} region."
+        
+        frame_image_path = None
+        try:
+            frame_name = f"shot_{shot_number}_impact.jpg"
+            frame_path = job_dir / frame_name
+            _save_impact_frame(run_frames[local_impact], local_impact_point, frame_path)
+            frame_image_path = str(Path("processed") / job_dir.name / frame_name)
+        except Exception as e:
+            logger.warning(f"Failed to save impact frame for shot {shot_number}: {e}")
+
+        shots.append(
+            {
+                "shot_number": shot_number,
+                "timestamp": shot_time,
+                "impact_frame": start_idx + local_impact,
+                "impact_point": {"x": local_impact_point[0], "y": local_impact_point[1]},
+                "landing_point": {"x": local_landing_point[0], "y": local_landing_point[1]},
+                "region": local_region,
+                "zone": local_zone,
+                "side": local_side,
+                "summary": shot_summary,
+                "shot_type": local_shot_type,
+                "shot_confidence": local_shot_conf,
+                "tracking_confidence": tracking_conf,
+                "model_used": model_used,
+                "frame_image_path": frame_image_path,
+            }
+        )
+
+        if impact_frame is None:
+            impact_frame = start_idx + local_impact
+            shot_type = local_shot_type
+            shot_confidence = local_shot_conf
+            impact_point = local_impact_point
+            landing_point = local_landing_point
+            region = local_region
+            side = local_side
+
+    wagon_wheel = _build_wagon_wheel_summary(shots)
+    if shots:
+        summary_text = "\n".join(shot["summary"] for shot in shots)
+    else:
+        summary_text = wagon_wheel["summary"]
+
+    return ShotSummaryResult(
+        shots=shots,
+        wagon_wheel=wagon_wheel,
+        impact_frame=impact_frame,
+        shot_type=shot_type,
+        shot_confidence=shot_confidence,
+        impact_point=impact_point,
+        landing_point=landing_point,
+        region=region,
+        side=side,
+        summary_text=summary_text,
     )
