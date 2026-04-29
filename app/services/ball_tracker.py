@@ -489,6 +489,54 @@ def _detect_bat_impact_and_shot(
     return impact_idx, shot_type, confidence
 
 
+def _detect_impact_and_shot_from_track(
+    centers: List[Optional[Tuple[int, int]]],
+) -> Tuple[Optional[int], Optional[str], Optional[float]]:
+    """Fallback impact detection from ball-only motion when landmarks are weak/missing."""
+    valid = [(i, p) for i, p in enumerate(centers) if p is not None]
+    if len(valid) < 6:
+        return None, None, None
+
+    idx = np.array([v[0] for v in valid], dtype=np.int32)
+    pts = np.array([v[1] for v in valid], dtype=np.float64)
+    ys = pts[:, 1]
+
+    # Look for a strong local vertical direction change as a proxy for impact timing.
+    dy = np.diff(ys)
+    if len(dy) < 3:
+        return None, None, None
+
+    candidate = None
+    best_strength = 0.0
+    for j in range(1, len(dy)):
+        pre = dy[j - 1]
+        post = dy[j]
+        if pre > 0 and post < 0:
+            strength = abs(pre) + abs(post)
+            if strength > best_strength:
+                best_strength = strength
+                candidate = j
+
+    if candidate is None:
+        # Fallback: pick early/mid sequence index to still classify direction for wagon wheel.
+        candidate = min(len(idx) - 3, max(1, len(idx) // 3))
+
+    impact_global = int(idx[candidate])
+    post_pts = [p for p in centers[impact_global: impact_global + 12] if p is not None]
+    if len(post_pts) < 3:
+        return impact_global, None, 0.45
+
+    y0 = float(post_pts[0][1])
+    min_after = float(min(p[1] for p in post_pts[1:]))
+    rise_px = y0 - min_after
+    shot_type = "aerial" if rise_px >= 22.0 else "ground"
+
+    rise_strength = float(np.clip(abs(rise_px) / 36.0, 0.0, 1.0))
+    change_strength = float(np.clip(best_strength / 18.0, 0.0, 1.0))
+    confidence = round(0.35 + 0.4 * rise_strength + 0.25 * change_strength, 2)
+    return impact_global, shot_type, confidence
+
+
 def _format_timestamp(frame_idx: int, fps: float) -> str:
     if fps <= 0:
         return "0:00"
@@ -503,13 +551,13 @@ def _classify_shot_region(
     landing_point: Tuple[int, int],
     frame_shape: Tuple[int, int, int],
 ) -> Tuple[str, str]:
-    """Map post-impact direction to a coarse batting region."""
+    """Map post-impact direction to a batting region aligned with 8 wagon-wheel zones."""
     h, w = frame_shape[:2]
     dx = landing_point[0] - impact_point[0]
     dy = landing_point[1] - impact_point[1]
 
     horizontal_threshold = max(18, int(w * 0.07))
-    vertical_threshold = max(10, int(h * 0.05))
+    vertical_threshold = max(10, int(h * 0.06))
 
     if abs(dx) <= horizontal_threshold:
         if dy >= vertical_threshold:
@@ -517,13 +565,19 @@ def _classify_shot_region(
         return "Straight / Down the ground", "straight"
 
     if dx < 0:
-        if dy >= -vertical_threshold:
+        if dy <= -vertical_threshold:
+            return "Backward Point", "off_side"
+        if dy >= vertical_threshold:
+            return "Mid-off", "off_side"
+        if dy >= 0:
             return "Cover / Extra Cover", "off_side"
-        return "Backward Point", "off_side"
+        return "Cover", "off_side"
 
-    if dy >= -vertical_threshold:
-        return "Mid-wicket / Square Leg", "leg_side"
-    return "Fine Leg / Third Man", "leg_side"
+    if dy <= -vertical_threshold:
+        return "Fine Leg / Third Man", "leg_side"
+    if dy >= vertical_threshold:
+        return "Mid-wicket", "leg_side"
+    return "Mid-wicket / Square Leg", "leg_side"
 
 
 def _extract_landing_point(
@@ -543,11 +597,18 @@ def _map_zone_to_wagon_wheel(region: str) -> str:
     """Map region string to wagon wheel zone code for counting."""
     zone_map = {
         "Cover / Extra Cover": "cover",
+        "Extra Cover": "cover",
+        "Cover": "cover",
         "Mid-off": "mid_off",
+        "Mid Off": "mid_off",
         "Backward Point": "backward_point",
         "Fine Leg": "fine_leg",
+        "Fine Leg / Third Man": "fine_leg",
+        "Third Man": "fine_leg",
         "Square Leg": "square_leg",
+        "Mid-wicket / Square Leg": "square_leg",
         "Mid-wicket": "mid_wicket",
+        "Mid Wicket": "mid_wicket",
         "Mid-on": "mid_on",
         "Straight / Mid-on": "mid_on",
         "Straight / Down the Ground": "straight",
@@ -609,7 +670,7 @@ def _build_wagon_wheel_summary(shots: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _contiguous_detection_runs(centers: List[Optional[Tuple[int, int]]], min_len: int = 8) -> List[Tuple[int, int]]:
+def _contiguous_detection_runs(centers: List[Optional[Tuple[int, int]]], min_len: int = 5) -> List[Tuple[int, int]]:
     """Return [start, end) ranges for contiguous non-empty detections."""
     runs: List[Tuple[int, int]] = []
     start: Optional[int] = None
@@ -874,6 +935,8 @@ def analyze_shot_summary(
         run_landmarks = landmark_sequence[start_idx:end_idx] if landmark_sequence and len(landmark_sequence) == len(frames) else None
         local_impact, local_shot_type, local_shot_conf = _detect_bat_impact_and_shot(run_frames, run_centers, run_landmarks)
         if local_impact is None:
+            local_impact, local_shot_type, local_shot_conf = _detect_impact_and_shot_from_track(run_centers)
+        if local_impact is None:
             continue
 
         local_impact_point = run_centers[local_impact] if 0 <= local_impact < len(run_centers) else None
@@ -932,10 +995,51 @@ def analyze_shot_summary(
             side = local_side
 
     wagon_wheel = _build_wagon_wheel_summary(shots)
+    if not shots:
+        # Fallback for batter analysis: infer one coarse shot from overall tracked direction.
+        valid_idx = [i for i, p in enumerate(centers) if p is not None]
+        if len(valid_idx) >= 2:
+            impact_guess = valid_idx[max(0, len(valid_idx) // 3 - 1)]
+            landing_guess = valid_idx[-1]
+            guessed_impact = centers[impact_guess]
+            guessed_landing = centers[landing_guess]
+            if guessed_impact is not None and guessed_landing is not None:
+                guessed_region, guessed_side = _classify_shot_region(guessed_impact, guessed_landing, frames[impact_guess].shape)
+                guessed_zone = _map_zone_to_wagon_wheel(guessed_region)
+                if guessed_side == "off_side":
+                    guessed_label = "Played to the off-side"
+                elif guessed_side == "leg_side":
+                    guessed_label = "Played to the leg-side"
+                else:
+                    guessed_label = "Played straight down the pitch"
+                fallback_shot = {
+                    "shot_number": 1,
+                    "timestamp": _format_timestamp(impact_guess, fps),
+                    "impact_frame": impact_guess,
+                    "impact_point": {"x": guessed_impact[0], "y": guessed_impact[1]},
+                    "landing_point": {"x": guessed_landing[0], "y": guessed_landing[1]},
+                    "region": guessed_region,
+                    "zone": guessed_zone,
+                    "side": guessed_side,
+                    "summary": f"Shot 1 ({_format_timestamp(impact_guess, fps)}): {guessed_label}, directed towards the {guessed_region} region (fallback trajectory inference).",
+                    "shot_type": None,
+                    "shot_confidence": 0.45,
+                    "tracking_confidence": tracking_conf,
+                    "model_used": model_used,
+                    "frame_image_path": None,
+                }
+                shots.append(fallback_shot)
+                impact_frame = impact_guess
+                impact_point = guessed_impact
+                landing_point = guessed_landing
+                region = guessed_region
+                side = guessed_side
+                wagon_wheel = _build_wagon_wheel_summary(shots)
+
     if shots:
         summary_text = "\n".join(shot["summary"] for shot in shots)
     else:
-        summary_text = wagon_wheel["summary"]
+        summary_text = "Ball could not be tracked reliably enough to infer a batting direction."
 
     return ShotSummaryResult(
         shots=shots,
