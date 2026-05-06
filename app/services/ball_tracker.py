@@ -81,6 +81,7 @@ def _get_yolo_model():
     """Lazy-load YOLO model if ultralytics is available.
 
     Uses env var BALL_TRACKER_MODEL (default: yolov8s.pt).
+    Set to empty string, "false", "none", or "disabled" to disable YOLO.
     """
     global _YOLO_MODEL, _YOLO_TRIED
     if _YOLO_TRIED:
@@ -90,7 +91,14 @@ def _get_yolo_model():
     try:
         from ultralytics import YOLO  # type: ignore
 
-        model_name = os.getenv("BALL_TRACKER_MODEL", "yolov8s.pt")
+        model_name = os.getenv("BALL_TRACKER_MODEL", "yolov8s.pt").strip()
+        
+        # Check if YOLO is explicitly disabled
+        if not model_name or model_name.lower() in ("false", "none", "disabled"):
+            logger.info("AI ball detector disabled - using CV fallback only")
+            _YOLO_MODEL = None
+            return _YOLO_MODEL
+        
         _YOLO_MODEL = YOLO(model_name)
         logger.info(f"AI ball detector enabled: {model_name}")
     except Exception as e:

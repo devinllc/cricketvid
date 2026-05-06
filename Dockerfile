@@ -48,6 +48,9 @@ ENV UVICORN_WORKERS=1
 # Frame interpolation factor: 1 = no interpolation (consistent across environments), 2+ = add synthetic frames
 # For consistency between local/server/Docker, default is 1 (all original frames kept).
 ENV ANALYSIS_INTERPOLATION_FACTOR=1
+# Ball tracker model: set to empty string to disable YOLO and use CV-only detection
+# Available values: "yolov8n.pt" (fast), "yolov8s.pt" (default if set), or "" (disabled)
+ENV BALL_TRACKER_MODEL=
 
 EXPOSE 8000
 
