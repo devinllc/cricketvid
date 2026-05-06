@@ -61,7 +61,7 @@ def enhance_video(input_path: str, output_dir: str) -> str:
 
 
 def _ffmpeg_enhance(input_path: str, output_path: str) -> None:
-    """Run FFmpeg with mild denoise + brightness normalization, preserving resolution."""
+    """Run FFmpeg with mild denoise + brightness normalization, preserving resolution and FPS."""
     cmd = [
         "ffmpeg",
         "-y",
@@ -77,6 +77,7 @@ def _ffmpeg_enhance(input_path: str, output_path: str) -> None:
         "-an",          # strip audio (not needed for pose)
         output_path,
     ]
+    # Note: FPS preserved implicitly; if frame-rate issues arise, add "-r 30" before output_path.
     result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     if result.returncode != 0:
         err = result.stderr.decode("utf-8", errors="ignore")

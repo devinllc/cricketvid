@@ -45,6 +45,8 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PORT=8000
 ENV UVICORN_WORKERS=1
+# Frame interpolation factor: 1 = no interpolation (consistent across environments), 2+ = add synthetic frames
+# For consistency between local/server/Docker, default is 1 (all original frames kept).
 ENV ANALYSIS_INTERPOLATION_FACTOR=1
 
 EXPOSE 8000

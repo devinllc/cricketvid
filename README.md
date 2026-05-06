@@ -25,8 +25,10 @@ Open your browser at: **http://localhost:8000**
 >
 > macOS: `brew install ffmpeg`  •  Ubuntu/Debian: `apt install ffmpeg`
 
-> Minimum server profile: 2 GB RAM, 1 web worker, and `ANALYSIS_INTERPOLATION_FACTOR=1`.
-> For heavier videos or concurrent uploads, 4 GB RAM+ is still recommended.
+> **Important:** For consistent local/server results, ensure `ANALYSIS_INTERPOLATION_FACTOR=1` is set in all environments.
+> See [Environment Variables](#-environment-variables) below for details on avoiding local/server output mismatches.
+>
+> **Troubleshooting:** If production returns empty wagon wheel while local detects shots, see [TROUBLESHOOTING_LOCAL_SERVER_PARITY.md](TROUBLESHOOTING_LOCAL_SERVER_PARITY.md) for diagnosis steps.
 
 ---
 
@@ -47,7 +49,36 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 ---
 
-## 📁 Project Structure
+## � Environment Variables
+
+| Variable | Default | Purpose | Notes |
+|---|---|---|---|
+| `ANALYSIS_INTERPOLATION_FACTOR` | `1` | Frame interpolation multiplier (1 = no interpolation, 2+ = add synthetic frames) | **CRITICAL:** Must match between local/Docker/server to avoid different shot detections. Default is 1 for consistency. |
+| `UVICORN_WORKERS` | `1` | Number of concurrent web workers | Set to 1 for small VPS (2+ for high-concurrency servers) |
+| `PORT` | `8000` | Server port | |
+| `PYTHONUNBUFFERED` | `1` | Unbuffered stdout for Docker logs | Already set in Dockerfile |
+
+### Local/Server Consistency
+
+If you see **different outputs** (empty wagon wheel on server but shots detected locally):
+1. Check Docker `Dockerfile` and local shell have matching `ANALYSIS_INTERPOLATION_FACTOR` values
+2. Verify FFmpeg is installed on server: `ffmpeg -version`
+3. Check logs for frame count: `Extracted XXX frames ... | interpolation_factor=X`
+
+Example setup for consistent multi-environment deployment:
+```bash
+# Local development
+export ANALYSIS_INTERPOLATION_FACTOR=1
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Docker build/run
+docker build -t cricket-ai .
+docker run -e ANALYSIS_INTERPOLATION_FACTOR=1 -p 8000:8000 cricket-ai
+```
+
+---
+
+## �📁 Project Structure
 
 ```
 cricketVideo/
@@ -211,6 +242,34 @@ Upload Video
   → Report builder: assemble JSON
   → Return via /report/{job_id}
 ```
+
+---
+
+## 🔧 Debugging Ball Detection Issues
+
+If your production server detects zero shots while local works fine:
+
+```bash
+# Run the diagnostic tool
+python3 diagnose_ball_detection.py cricket_video.mov
+```
+
+This tool will:
+- ✅ Check if YOLO model is available
+- ✅ Test OpenCV color+motion detection
+- ✅ Verify frame extraction
+- ✅ Suggest fixes for your specific issue
+
+**Common fixes:**
+```bash
+# Disable YOLO, use CV-only fallback (faster, less accurate)
+docker run -e BALL_TRACKER_MODEL="" -p 8000:8000 cricket-ai
+
+# Use smaller YOLO model (nanomodel)
+docker run -e BALL_TRACKER_MODEL="yolov8n.pt" -p 8000:8000 cricket-ai
+```
+
+See [TROUBLESHOOTING_LOCAL_SERVER_PARITY.md](TROUBLESHOOTING_LOCAL_SERVER_PARITY.md) for complete diagnosis.
 
 ---
 

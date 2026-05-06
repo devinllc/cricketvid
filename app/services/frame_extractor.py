@@ -16,8 +16,9 @@ logger = get_logger(__name__)
 FRAME_STEP = 1  # Extract every Nth frame
 
 # Temporal upsampling factor for analysis (1 = disabled, 2 = add one synthetic in-between frame).
-# This improves motion continuity on short/fast ball flights.
-INTERPOLATION_FACTOR = max(1, int(os.getenv("ANALYSIS_INTERPOLATION_FACTOR", "2")))
+# Default to 1 (no interpolation) for consistency across environments.
+# Interpolation is experimental and can cause tracking mismatches between local/server.
+INTERPOLATION_FACTOR = max(1, int(os.getenv("ANALYSIS_INTERPOLATION_FACTOR", "1")))
 
 
 def extract_frames(video_path: str) -> Tuple[List[np.ndarray], float]:
@@ -70,6 +71,11 @@ def extract_frames(video_path: str) -> Tuple[List[np.ndarray], float]:
     effective_fps = adjusted_fps * INTERPOLATION_FACTOR
     logger.info(
         f"Extracted {len(frames)} frames (duration: {len(frames) / effective_fps:.1f}s) "
-        f"from {Path(video_path).name}"
+        f"from {Path(video_path).name} | interpolation_factor={INTERPOLATION_FACTOR}"
     )
+    if INTERPOLATION_FACTOR > 1:
+        logger.warning(
+            f"Frame interpolation enabled (factor={INTERPOLATION_FACTOR}). "
+            f"For consistent local/server results, verify ANALYSIS_INTERPOLATION_FACTOR env var is set to 1."
+        )
     return frames, effective_fps
